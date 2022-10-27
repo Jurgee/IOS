@@ -1,0 +1,37 @@
+--- proj2.c.odevzdany	2022-05-10 15:56:23.454065896 +0200
++++ proj2.c	2022-05-10 15:56:40.794065709 +0200
+@@ -9,6 +9,7 @@
+ #include <sys/stat.h>
+ #include <fcntl.h>
+ #include <stdbool.h>
++#include <time.h>
+ #define MMAP(pointer){(pointer) = mmap(NULL, sizeof(*(pointer)), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);}
+ #define UNMAP(pointer) {munmap((pointer), sizeof((pointer)));}
+ #define mysleep(max) { usleep(1000 * (rand() % (max + 1))); }
+@@ -136,7 +137,7 @@
+ 
+ void KyslikProcess(int AtomTime, int i, int MoleculeTime)
+ {
+-    
++    srand(time(NULL) * getpid());
+     int tmp = i;
+     tmp++;
+     sem_wait(writing);
+@@ -225,7 +226,7 @@
+     sem_wait(barrier2);
+     sem_post(barrier2);
+     
+-    if ((*OxyQueue) == *MoleculeCounter-1 || (*HydroQueue) == *MoleculeCounter-1 * 2 || *HydroQueue - (*MoleculeCounter-1 * 2) <= 1)
++    if (*MoleculeCounter-1 >= (*OxyQueue)|| (*HydroQueue) <= (*MoleculeCounter-1) * 2 || (*HydroQueue) - (*MoleculeCounter-1) * 2 <= 1)
+     {
+         *Enough = true;
+         for (int i = 0; i < *OxyQueue; i++)
+@@ -244,7 +245,7 @@
+ }
+ void VodikProcess(int AtomTime, int i)
+ {
+-    
++    srand(time(NULL) * getpid());
+     int tmp = i;
+     tmp++;
+     sem_wait(writing);

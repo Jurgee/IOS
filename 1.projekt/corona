@@ -1,0 +1,322 @@
+#!/bin/bash
+
+export POSIXLY_CORRECT=yes
+export LC_ALL=C
+
+
+print_help()
+{
+    echo "Usage: corona [-h] [FILTERS] [COMMAND] [LOG [LOG2 [...]]
+	"
+	echo "COMMAND:"
+	echo "	
+infected — spočítá počet nakažených.
+
+merge — sloučí několik souborů se záznamy do jednoho, zachovávající původní pořadí.
+
+gender — vypíše počet nakažených pro jednotlivá pohlaví.
+
+age — vypíše statistiku počtu nakažených osob dle věku.
+
+daily — vypíše statistiku nakažených osob pro jednotlivé dny.
+
+monthly — vypíše statistiku nakažených osob pro jednotlivé měsíce.
+
+yearly — vypíše statistiku nakažených osob pro jednotlivé roky.
+
+countries — vypíše statistiku nakažených osob pro jednotlivé země nákazy (bez ČR, tj. kódu CZ).
+
+districts — vypíše statistiku nakažených osob pro jednotlivé okresy.
+
+regions — vypíše statistiku nakažených osob pro jednotlivé kraje.
+"
+	echo "FILTERS:"
+	echo "
+-a DATETIME — after: jsou uvažovány pouze záznamy PO tomto datu (včetně tohoto data). DATETIME je formátu YYYY-MM-DD.
+
+-b DATETIME — before: jsou uvažovány pouze záznamy PŘED tímto datem (včetně tohoto data).
+
+-g GENDER — jsou uvažovány pouze záznamy nakažených osob daného pohlaví. GENDER může být M (muži) nebo Z (ženy).
+
+-s [WIDTH] u příkazů gender, age, daily, monthly, yearly, countries, districts a regions vypisuje data ne číselně, ale graficky v podobě histogramů. Nepovinný parametr WIDTH nastavuje šířku histogramů, tedy délku nejdelšího řádku, na WIDTH. Tedy, WIDTH musí být kladné celé číslo.
+	"
+}
+IN=""
+while [ "$#" -gt 0 ]; do
+      	case "$1" in
+
+		*.csv.bz2)
+			IN=$( bzcat "$1" )
+			if [ "$2" != "" ]; then
+			>&2 echo "[ERROR]: $2 is not expected"
+			exit 1
+			fi
+			;;
+
+		*.csv.gz)
+			IN=$( zcat "$1" )
+			if [ "$2" != "" ]; then
+			>&2 echo "[ERROR]: $2 is not expected"
+			exit 1
+			fi
+			;;
+
+		*.csv)
+		  	IN="$1"
+			IN=$( cat "$IN" )
+			if [ "$2" != "" ]; then
+			>&2 echo "[ERROR]: $2 is not expected"
+			exit 1
+			fi
+			;;
+		-h)
+			print_help
+			exit 0
+			;;
+		-*)
+			FILTERS="$1"
+			;;
+
+		[M-Z])
+			GENDER="$1"
+			;;
+
+		[1-9]*)
+			DAYTIME="$1"
+			;;
+
+		*)
+			COMMAND="$1"
+			;;
+      esac
+	  shift
+done
+
+if [ "$IN" == "" ]; then
+IN=$(cat -)
+fi
+
+HEAD="id,datum,vek,pohlavi,kraj_nuts_kod,okres_lau_kod,nakaza_v_zahranici,nakaza_zeme_csu_kod,reportovano_khs"
+if [ "$COMMAND" == "" ] && [ "$FILTERS" == "" ] && [ "$DAYTIME" == "" ] && [ "$GENDER" == "" ] && [ "$IN" == "" ]; then
+	echo "$HEAD"
+	exit 0
+fi
+
+#verifikace
+IN=$(echo "$IN" | sed 's/ /,/g')
+IN=$(echo "$IN" | sed -r '/^\s*$/d')
+#vek:
+echo "$IN" | awk -F, 'NR==1{next} {if ($3 ~ /[^0-9]/) {print "Invalid age: "$0;}}'
+
+#datum:
+#echo "$IN" | awk -F, \
+ #   'NR==1{next} {A[substr($2, 9, 10)];
+  #  for (first in A) {
+   #     if ( first <= 1 )
+    #    {
+     #       print "Invalid date: " $first;
+      #  }
+    #}
+#}'
+
+# filters or help
+if [ "$FILTERS" == -g ]; then
+		if [ -z "$GENDER" ]
+		then
+			>&2 echo "[ERROR]: Please set gender"
+			exit 1
+		elif [ "$GENDER" == "M" ] && [ "$COMMAND" == "" ]
+		then
+		IN=$(echo "$IN" | awk -F, '$4 == "M"')
+		echo "$HEAD"
+		echo "$IN"
+
+		elif [ "$GENDER" == "M" ] && [ "$COMMAND" != "" ]
+		then
+		IN=$(echo "$IN" | awk -F, '$4 == "M"')
+
+		elif [ "$GENDER" == "Z" ] && [ "$COMMAND"  == "" ]
+		then
+		IN=$(echo "$IN" | awk -F, '$4 == "Z"')
+		echo "$HEAD"
+		echo "$IN"
+
+		elif [ "$GENDER" == "Z" ] && [ "$COMMAND" != "" ]
+		then
+		IN=$(echo "$IN" | awk -F, '$4 == "Z"')
+
+		elif [ "$GENDER" != "M" ] && [ "$GENDER" != "Z" ] 
+		then
+			>&2 echo "[ERROR]: Choose between M or Z"
+			exit 1
+		fi
+fi
+#date -a
+if [ "$FILTERS" == -a ]; then
+outA=$(echo "$IN" |  
+		awk -F, \
+		-v Daytime="$DAYTIME"\
+		'{
+			if ($2 > Daytime) 
+			{
+				print $0;
+			}
+		}
+		')
+if [ "$COMMAND" == "" ]; then
+	echo "$outA"
+fi
+fi
+if [ "$FILTERS" == -b ]; then
+outB=$(echo "$IN" |  
+		awk -F, \
+		-v Daytime="$DAYTIME"\
+		'{
+			if ($2 < Daytime) 
+			{
+				print $0;
+			}
+		}
+		')
+if [ "$COMMAND" == "" ]; then
+	echo "$outB"
+fi
+fi
+
+if [ "$COMMAND" == "" ] && [ "$FILTERS" == "" ]; then
+echo "$IN"
+fi
+
+# commands
+if [ "$COMMAND" == infected ]; then
+    	echo "$IN" | awk -F, 'NR==1{next} BEGIN{count=0} {count++;} END {print count}'
+		exit 0
+
+elif [ "$COMMAND" == gender ]; then		
+		echo "$IN" | awk -F, \ 'NR==1{next} BEGIN{Mcounter=0; Zcounter=0; None=0} 
+								{
+								if ($4 == "M") 
+									Mcounter++;
+								if ($4 == "Z")
+									Zcounter++;
+								if ($4 == "") 
+									None++;
+								}
+								END{
+									if (Mcounter != 0 || Zcounter != 0)
+										print "M: " Mcounter;	
+										print "Z: " Zcounter;
+									if (None != 0)
+										print "None: " None;
+								}'
+								exit 0
+elif [ "$COMMAND" == age ]; then
+		echo "$IN" | awk -F, \ 'NR ==1{next} BEGIN{count5=0; count6=0; count16=0; count26=0; count36=0; count46=0; count56=0; count66=0; count76=0; count86=0; count96=0; count105=0; None=0;}
+								{
+									
+									if ($3 >= 0 && $3 <= 5)
+									{
+										count5++;
+									}
+									if ($3 >= 6 && $3 <= 15){
+										count6++;
+									}
+									if ($3 >= 16 && $3 <= 25){
+										count16++;
+									}
+									if ($3 >= 26 && $3 <= 35){
+										count26++;
+									}
+									if ($3 >= 36 && $3 <= 45){
+										count36++;
+									}
+									if ($3 >= 46 && $3 <= 55){
+										count46++;
+									}
+									if ($3 >= 56 && $3 <= 65){
+										count56++;
+									}
+									if ($3 >= 66 && $3 <= 75){
+										count66++;
+									}
+									if ($3 >= 76 && $3 <= 85){
+										count76++;
+									}
+									if ($3 >= 86 && $3 <= 95){
+										count86++;
+									}
+									if ($3 >= 96 && $3 <= 105){
+										count96++;
+									}
+									if ($3 > 105){
+										count105++;
+									}
+									if ($3 == ""){
+										None++;
+									}
+								}
+								END{
+									print "0-5   : "  count5; 
+									print "6-15  : " count6;
+									print "16-25 : " count16;
+									print "26-35 : " count26;
+									print "36-45 : " count36;
+									print "46-55 : " count46;
+									print "56-65 : " count56;
+									print "66-75 : " count66;
+									print "76-85 : " count76;
+									print "86-95 : " count86;
+									print "96-105: " count96;
+									print ">105  : " count105;
+									if(None != 0)
+									print "None  : " None;
+
+								}'
+								exit 0
+
+elif [ "$COMMAND" == daily ]; then
+		echo "$IN" | awk -F, 'NR == 1{next} {A[$2] += 1} 
+							END{
+								for (line in A)
+								print line": " A[line]}' | sort
+								exit 0
+elif [ "$COMMAND" == monthly ]; then
+		echo "$IN" | awk -F, 'NR == 1{next} {A[substr($2, 1, 7)] += 1} 
+							END{
+								for (line in A)
+								print line": " A[line]}' | sort
+								exit 0
+elif [ "$COMMAND" == yearly ]; then
+		echo "$IN" | awk -F, 'NR == 1{next} {A[substr($2, 1, 4)] += 1} 
+							END{
+								for (line in A)
+								print line": " A[line]}' | sort
+								exit 0
+		
+elif [ "$COMMAND" == countries ]; then
+		echo "$IN" | awk -F, 'NR == 1{next} {A[$8] += 1}
+							END{
+								for (line in A){
+								if(line != "" && line != "CZ")
+								print line": " A[line]}}' | sort
+								exit 0
+
+elif [ "$COMMAND" == districts ]; then
+		echo "$IN" | awk -F, 'NR == 1{next} {A[$6] += 1}
+							END{
+								for (line in A){
+									if(line != "")
+									print line": " A[line]}}' | sort
+									exit 0
+
+elif [ "$COMMAND" == regions ]; then
+		echo "$IN" | awk -F, 'NR == 1{next} {A[$5] += 1}
+							END{
+								for (line in A){
+									if(line != "")
+									print line": " A[line]}}' | sort
+									exit 0
+
+fi
+
+
